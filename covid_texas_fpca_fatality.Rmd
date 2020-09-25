@@ -1,0 +1,264 @@
+---
+title: "covid_texas_fpca_fatality"
+author: "Bohan Wu"
+date: "6/30/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##Data preprocessing: Hospitalization Data
+```{r, echo= FALSE,message=FALSE, results='hide'}
+rm(list = ls()); 
+#library(devtools)
+#install_github("drkowal/rSTAR")
+library(readr)
+library(tidyverse)
+library(reshape2)
+
+dat_f = read_csv(file = 'Texas COVID-19 Fatality Count Data by County.csv') 
+# Tidy:
+dat_f = dat_f %>% pivot_longer(
+  cols = colnames(dat_f)[-1], 
+  names_to = "date", 
+  values_to = "total fatalities") %>%
+  mutate(date = as.Date(paste(date, "-2020", sep=''), "%m-%d-%Y"))
+
+# Add the new fatalities by county:
+dat_f = dat_f %>% 
+  group_by(`County Name`) %>% 
+  mutate(fatalities = c(NA, diff(`total fatalities`)))
+
+county_population <- read.csv("Texas County Population.csv", row.names=1, sep=";")
+# Tidy:
+county_population = county_population %>%
+  rename(`County Name` = County.Name)%>% 
+  mutate(Population = as.numeric(Population))%>% distinct()
+
+
+dat_f = dat_f %>%
+  inner_join(county_population)
+
+```
+Case count data
+```{r}
+#----------------------------------------------------------------------------
+dat_c = read_csv(file = 'Texas COVID-19 Case Count Data by County.csv') 
+
+# Tidy:
+dat_c = dat_c %>% pivot_longer(
+  cols = colnames(dat_c)[-1], 
+  names_to = "date", 
+  values_to = "total cases") %>%
+  mutate(date = as.Date(paste(date, "-2020", sep=''), "%m-%d-%Y"))
+
+# Add the new fatalities by county:
+dat_c = dat_c %>% 
+  group_by(`County Name`) %>% 
+  mutate(cases = c(NA, diff(`total cases`)))
+
+# Merge cases and fatalities:
+#----------------------------------------------------------------------------
+dat_cf = inner_join(dat_c, dat_f)
+```
+###Problems: 
+1. Statewide Total, NA are redudant rows. > Remove Statewide Total, NA. 
+```{r visualization,tidy.opts=list(width.cutoff=60)}
+#Remove Statewide Total from the dat_f
+dat_cf0 = dat_cf %>% filter(`County Name` != "Total")%>% group_by(`County Name`) 
+```
+2. For each county, set the starting date to be the date 10 fatalities are recorded
+```{r}
+dat_cf.first10 = dat_cf0 %>% filter(`total cases` >= 10)%>% mutate(which_date = seq(length(fatalities))) %>% rename(county = `County Name`)
+#Visualization
+ggplot(dat_cf.first10, aes(x = which_date, y = fatalities, group = county )) + geom_line()
+```
+```{r,message=FALSE}
+#Cast a matrix where columns are locations, columnas are dates
+mat_f = dcast(dat_cf.first10 %>% select(c(county,which_date,fatalities)), county ~which_date,sum, fill = -1) %>% filter(complete.cases(county)) %>% column_to_rownames(var = "county") %>% as.matrix() 
+mat_f[mat_f < 0] <- NA
+``` 
+### Remove counties with less than 10 observations
+```{r}
+threshold = 10
+selected_counties <- apply(mat_f,1,function(row) sum(!is.na(row)) >= 10)
+print(paste0(sum(selected_counties)," out of ", length(selected_counties)," are selected" ))
+mat_f = mat_f[selected_counties,]
+
+```
+## FPCA 
+###Set the parameters
+```{r}
+library(fdapace)
+library(fpca)
+library(gdata)
+library(glmnet)
+library(refund)
+
+Lt_f <- lapply(seq(nrow(mat_f)), function(i) which(!is.na(mat_f[i,]))) #Time Grid
+y_f = unmatrix(mat_f, byrow = TRUE)%>% na.exclude()  #Vectorized observations
+n_counties = nrow(mat_f) #number of counties
+n_dates = ncol(mat_f) #total days since the outbreak
+n_fpc = 4 #number of FPCs
+```
+
+#FPCA.MLE Fitting
+```{r}
+#d = dat_cf.first10 %>% select(county,fatalities,which_date)
+FPCA.MLE.Fit <- function(input,r.set = n_fpc){
+
+#Create input dataset
+d2 = melt(input)  %>% 
+  rename(dates = Var2, county = Var1) %>%
+  group_by(county )  %>% 
+  drop_na()%>% mutate(dates = dates/n_dates)
+d2 = d2[,c("county","value","dates")]
+
+M.set<- c(r.set,r.set + 1)
+ini.method="EM"
+basis.method="bs"
+sl.v=rep(1,10)
+max.step= 50
+  
+#FPCA MLE fit
+result <<- fpca.mle(as.matrix(d2),M.set, r.set,ini.method, basis.method,sl.v,max.step, grids= seq(0,1,length.out = n_dates))
+##ret(mat_f)scaled grid
+
+ grids.new<-result$grid
+ 
+ M <-result$selected_model[1]
+r<-result$selected_model[2]
+
+ ## estimated eigenvalues 
+ evalest<-result$eigenvalues     #
+
+ ##estimated error variance
+ sig2est<-result$error_var       
+
+ ##estimated eigenfunctions
+ eigenfest<<-result$eigenfunctions
+ 
+ par(mfrow=c(2,3))
+  for(i in 1:r){
+ plot(grids.new,eigenfest[i,],ylim=range(eigenfest),xlab="time",ylab=paste("eigenfunction",i))}
+
+muest<-result$fitted_mean
+fpcs<-fpca.score(d2 %>% as.matrix(),grids.new,muest,evalest,eigenfest,sig2est,r)
+
+
+pred<<-fpca.pred(fpcs, muest,eigenfest) %>% t()%>% melt()
+ggplot(pred) + geom_line(aes(x = Var2,y = value, group = Var1))
+
+opt  = list(fitted.values = matrix(), coefficients = matrix())
+opt$fitted_values = fpca.pred(fpcs, muest,eigenfest) %>% t()
+opt$coefficients = c(as.vector(fpcs),muest, as.vector(eigenfest))
+return(opt)
+}
+
+
+```
+###Estimator 1: Construct Estimator Function Using fpca.face
+```{r}
+source("face estimator.R")
+source("fpca_em.R")
+
+```
+```{r}
+estimator.mle = function(v = y_f)
+{
+input <<- list(Ly = matrix(nrow = n_counties, ncol = n_dates),Lt = Lt_f,all.Ly = v)
+
+for(i in seq(n_counties)){
+  input$Ly[i,input$Lt[[i]]] <- input$all.Ly[input$Lt[[i]]]
+  input$all.Ly <- input$all.Ly[-input$Lt[[i]]]
+}
+#Use first 10 FPCs
+
+FPCA.fit <- FPCA.MLE.Fit(input$Ly,n_fpc )
+
+fitted_f.obs = FPCA.fit$fitted_values
+#Output
+output <- list(fitted.values = matrix(), coefficients = matrix())
+
+for(i in seq(n_counties)){
+  output$fitted.values <- append(output$fitted.values,fitted_f.obs[i, input$Lt[[i]]])
+}
+output$coefficients <- FPCA.fit$coefficients%>% na.exclude()
+output$fitted.values <- output$fitted.values  %>% na.exclude()
+return(output)
+}
+estimator.mle()
+```
+
+
+##RSTAR Model Fit: FPCA + STAR EM
+```{r freq-lm,message=FALSE,tidy.opts=list(width.cutoff=60)}
+library(rSTAR)
+library(gt)
+
+transformation = 'log' # Log transformation
+transformation = 'np' 
+# EM algorithm for STAR (using the log-link)
+fit_em = star_EM(y = y_f, 
+                 estimator = estimator.mle, 
+                 transformation = transformation,
+  sd_init = 10,
+  tol = 10^-6,
+  max_iters = 100)
+
+```
+###Eigenfunctions
+```{r}
+dat_phis = eigenfest %>% melt() %>% rename(which_date = Var2, which_fpc = Var1) %>% mutate(which_fpc = as.factor(which_fpc))
+ggplot(dat_phis) + aes(x = which_date, y = value, color = which_fpc,group = which_fpc) +
+  geom_line() +
+  ggtitle("FPCs")+ scale_fill_continuous(rainbow(5))
+
+dat_phis = FPCA.fit$efunctions %>% melt() %>% rename(which_date = Var1, which_fpc = Var2) %>% mutate(which_fpc = as.factor(which_fpc))
+ggplot(dat_phis) + aes(x = which_date, y = value, color = which_fpc,group = which_fpc) +
+  geom_line() +
+  ggtitle("FPCs")+ scale_fill_continuous(rainbow(5))
+```
+###Fitted values:
+```{r}
+y_hat = fitted(fit_em)
+mat_f_hat = mat_f
+for(i in seq(n_counties)){
+  mat_f_hat[i,input$Lt[[i]]] <- y_hat[input$Lt[[i]]]
+  y_hat <- y_hat[-input$Lt[[i]]]
+}
+```
+```{r}
+dat_f_est = melt(mat_f_hat) %>% rename('county'  = Var1,which_date = Var2,fatalities_est = value)
+dat_cf_all = dat_cf.first10 %>% inner_join(dat_f_est,by = c("county","which_date"))
+#Visualization
+ggplot(dat_cf_all, aes(x = which_date, y = fatalities, group = county)) + geom_line() + geom_line(aes(x = which_date, y = fatalities_est, group = county ,color = "estimated"))+
+  ggtitle("Actual vs Estimated Fatalities for each Counties in Texas")
+```
+
+##MLE 
+###Plot the progression of log-likelihood over time: log_transform
+```{r}
+plot(fit_em$logLik_all, main = "log-likehood under log tranformation")
+which(fit_em$logLik_all == max(fit_em$logLik_all))
+```
+###Plot the progression of log-likelihood over time: nonparametric transform
+```{r}
+# EM algorithm for STAR (using the log-link)
+fit_em.np = star_EM(y = y_f, 
+                 estimator = estimator.fpca, 
+                 transformation = 'np' ,
+  sd_init = 10,
+  tol = 10^-10,
+  max_iters = 100)
+library(fpca)
+
+```
+```{r}
+plot(fit_em$logLik_all, main = "log-likehood under nonparametric tranformation")
+```
+```{r}
+plot(fit_em.np$logLik_all[1:l] - fit_em$logLik_all, main = "log-likehood over 1000 iterations under nonparametric tranformation")
+
+```

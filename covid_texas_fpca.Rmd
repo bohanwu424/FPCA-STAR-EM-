@@ -1,0 +1,136 @@
+---
+title: "Covid FPCA Project"
+author: "Bohan Wu"
+date: "6/24/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##Data preprocessing: Hospitalization Data
+```{r, echo= FALSE,message=FALSE, results='hide'}
+rm(list = ls()); 
+#library(devtools)
+#install_github("drkowal/rSTAR")
+library(readr)
+library(tidyverse)
+library(reshape2)
+
+dat_h = read_csv("Texas COVID-19 Hospitalizations by TSA.csv")
+
+# Tidy:'
+dat_h = dat_h %>% pivot_longer(
+  cols = colnames(dat_h)[-(1:2)], 
+  names_to = "date", 
+  values_to = "hospitalizations") %>%
+  mutate(date = as.Date(paste(date, "/2020", sep=''), "%m/%d/%Y"))
+
+```
+###Problems: 
+1. Statewide Total, NA are redudant rows. > Remove Statewide Total, NA. 
+2. The first FPC may be the mean function. > Center Data. (But we can't since we wish to preserve count data structure)
+```{r visualization,tidy.opts=list(width.cutoff=60)}
+#Remove Statewide Total from the mat_h
+dat_h2 = dat_h %>% filter(`TSA Name` != "Statewide Total")%>% group_by(`TSA Name`)
+dat_h.diff = tapply(dat_h2$hospitalizations,dat_h2$`TSA Name`,diff) %>% 
+  lapply(FUN = function(l)c(0,l)) %>% 
+  melt()%>%
+  rename(new_hospitalizations = value, county = L1)%>%
+  mutate(date = dat_h2$date) #differencing, get data for new hospitalization
+
+#Visualization
+ggplot(dat_h.diff, aes(x = date, y = new_hospitalizations, group = county, color = county )) + geom_line()
+```
+
+```{r,message=FALSE}
+#Cast a matrix where columns are locations, columnas are dates
+mat_h = dcast(dat_h2[-1], `TSA Name` ~date,sum) %>%
+  filter(complete.cases(`TSA Name`)) %>% column_to_rownames(var = "TSA Name") %>%
+  as.matrix() 
+```
+##FPCA 
+* Find the right number of FPCs via proportion of variances explained
+```{r prop-var,message=FALSE,tidy.opts=list(width.cutoff=60)}
+library(refund)
+library(reshape)
+
+nfpc = nrow(mat_h)
+all_evalues = fpca.sc(mat_h, npc = nfpc)$evalues
+plot(cumsum(all_evalues/sum(all_evalues)), ylab = "proportion of variance expalined", xlab = "# of FPC")
+
+#5 FPCs seem a good number
+```
+```{r fpca}
+nfpc = 5
+fpca_h = fpca.face(mat_h, npc = nfpc)
+```
+*Plot Eigenfunctions
+```{r eigenfunctions,tidy.opts=list(width.cutoff=60)}
+efunc_h = melt(fpca_h$efunctions)  %>% dplyr::rename(date = X1,func = X2) %>% mutate(date = as.Date(colnames(mat_h)[date]))
+ggplot(data = efunc_h, aes(x = date, y = value, group = func, color = func))+
+  geom_line()+ 
+  scale_x_date(date_labels = "%Y-%m-%d", date_breaks = "2 weeks") +
+  ggtitle('Eigenfunctions for Hospitalization Data')+
+  scale_color_gradientn(colours = rainbow(10))
+```
+*RSTAR Model Fit: FPCA + STAR EM
+```{r freq-lm,message=FALSE,tidy.opts=list(width.cutoff=60)}
+library(rSTAR)
+library(gt)
+rSTAR_h = function(location = "Houston",fpca_obj = fpca_h,data = mat_h, CI = TRUE){
+#data : rows are location, columns are days
+#fpca_obj : an object using fpca to fit on data
+#location : the location at which we wish to evaluate the FPC scores
+y = data[location,]
+dat_fpc_h = cbind(y,fpca_obj$efunctions) %>% as.data.frame()
+names(dat_fpc_h) = c("y",paste0("f", seq(fpca_obj$npc)))
+
+# Construct a design matrix:
+X = model.matrix( y~ .,data = dat_fpc_h)
+# Dimensions:
+Y = mat_h
+n = nrow(X); p = ncol(X)
+
+# Define the estimator function:
+d = fpca.face(Y)
+list('fitted.values' = fpca.face(Y, npc = nfpc)$Yhat,'coefficients' =  d$scores)
+estimator = function(y) list('fitted.values' = fpca.face(Y, npc = nfpc)$Yhat,'coefficients' =  d$scores)
+# Select a transformation:
+transformation = 'log' # Log transformation
+#transformation = 'np' # Estimated transformation using empirical CDF
+# EM algorithm for STAR (using the log-link)
+fit_em = star_EM(y = Y, 
+                 estimator = estimator, 
+                 transformation = transformation)
+# Fitted coefficients:
+#print(round(coef(fit_em), 3))
+# Fitted values:
+y_hat = fitted(fit_em)
+plot(Y,y_hat)
+plot(as.Date(colnames(Y)),y,main = paste0(location), xlab = "Dates")
+lines(as.Date(colnames(Y)),y_hat)
+
+# Confidence for all columns:
+if(CI){
+ ci_all = sapply(1:p, function(j)
+  star_CI(y = y, X = X, level = 0.95,
+        j = j,
+        transformation = transformation, 
+        include_plot = FALSE))
+colnames(ci_all) = colnames(X); 
+rownames(ci_all) = c('Lower', 'Upper')
+print(t(round(ci_all, 3))) 
+}
+}
+```
+*Examples of Model Fit on 4 Cities' Hospitalization Data: Austin, El Paso,Houston,San Antonio
+```{r,tidy.opts=list(width.cutoff=60)}
+par(mfrow = c(2,2))
+rSTAR_h(location = "Austin")
+rSTAR_h(location = "El Paso")
+rSTAR_h(location = "Houston")
+rSTAR_h(location = "San Antonio")
+
+```
+
