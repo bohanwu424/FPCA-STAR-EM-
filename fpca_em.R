@@ -86,9 +86,10 @@ fpca_em=function(formula, data, grouping, m, knots, lambda,
 		response_name=NA, time_name=NA, maxiter=5000)
 # m is the number of components
 {
+  
 # figure the names
 	if(length(formula)==3) 
-	# if formula==NA, then length(formula)==1
+#	 if formula==NA, then length(formula)==1
 	# Yes. This is an ugly hack. Hope to find a better solution.
 	{
 		response_name=formula[[2]]
@@ -126,14 +127,18 @@ fpca_em=function(formula, data, grouping, m, knots, lambda,
 	mean_parm=mean_parm_start
 	y_random=y # to begin with, random effects are zero.
 	s2=s2_start
-	if (any(is.na(theta_start)))
-		theta=matrix(rnorm(m*n_basis, mean=0, sd=0.1), nrow=n_basis, ncol=m)
-	else
-		theta=theta_start
-	if (any(is.na(D_start)))
-		D=diag(1, m)
-	else
-		D=D_start
+	if (any(is.na(theta_start))){
+	  theta=matrix(rnorm(m*n_basis, mean=0, sd=0.1), nrow=n_basis, ncol=m)
+	}
+	else{
+	  theta=theta_start
+	}
+	if (any(is.na(D_start))){
+	  D=diag(1, m)
+	}
+	else{
+	  D=D_start
+	}
 	Dinv=solve(D)
 
 	penalty_matrix_original=OuterProdSecondDerivative(obase)
@@ -182,8 +187,10 @@ fpca_em=function(formula, data, grouping, m, knots, lambda,
 				old_theta=theta
 				for (j in 1:m)
 				{
+				  d_theta2 <<- theta
+				  n_basis2 <<- n_basis
 					null_space=svd(t(theta[,-j]), nv=n_basis)$v[,m:n_basis]
-
+					d <<- list(j, y_mu, aaBB, B, theta, alpha, aa, null_space)
 					theta[,j]=get_theta(j, y_mu, aaBB, B, theta, alpha, aa, null_space)
 					theta[,j]=theta[,j]/sqrt(sum(theta[,j]^2))
 

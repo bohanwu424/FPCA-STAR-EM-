@@ -1,5 +1,6 @@
+library(MASS)
 james_em = function(dat, groupings = 'county', m, knots, lambda, 
-                 mean_parm_start = 0, theta_0, D_start, s2_start, tol, status=F, showlik=F,
+                 mean_parm_start = 0, theta_start,efunc, D_start, s2_start, tol, status=F, showlik=F,
                  response_name="value", time_name="dates", maxiter= 2000)
   # m is the number of components
 {
@@ -30,8 +31,9 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
     BB[,,i]=t(B[[i]]) %*% B[[i]]
   }
   
-  theta_start = t(evaluate(obase, knots))%*% theta_0
-
+  if(any(is.na(theta_start))){
+    theta_start = ginv(evaluate(obase, knots))%*% efunc #generalize inverse Theta = S^{-1} %*% F
+  }
   # Initialization
   id_idx=1:n
   mean_parm=mean_parm_start
@@ -135,13 +137,13 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
       print(parm_diff)
     if (showlik==T)
       print(loglik(formula, groupings, dat, m, knots, lambda, mean_parm, theta, D, s2, response_name, time_name))
+    # Calculate the difference between the current and last log-likelihood estimate
+    log_like_new = loglik(formula, groupings, dat, m, knots, lambda, mean_parm, theta, D, s2, response_name, time_name)[1]
+    log_like_diff = abs(log_like_new - log_like_old)
+    log_like_old = log_like_new
     
   }
-  # Calculate the difference between the current and last log-likelihood estimate
-  log_like_new = loglik(formula, groupings, dat, m, knots, lambda, mean_parm, theta, D, s2, response_name, time_name)[1]
-  log_like_diff = abs(log_like_new - log_like_old)
-  log_like_old = log_like_new
-  
+
   output <<- list(fitted.values = matrix(), coefficients = matrix())
   #fitted values#
   Yy = matrix(nrow = n, ncol = length(knots))
@@ -149,7 +151,8 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
     Yy[i,1:nrow(B[[i]])] = B[[i]]%*%theta %*% alpha[,i]
   }
   output$fitted.values <- as.vector(t(Yy)) %>% na.exclude()
-  output$coefficients <- c(as.vector(mean_parm), as.vector(theta),D, s2, as.vector(alpha)) %>% na.exclude()
-
+  output$coefficients <- c(length(unique(TIME)), m,
+                           as.vector(theta),as.vector(evaluate(obase, knots)%*% theta),
+                           diag(D), s2) %>% na.exclude()
     return(output)
 }
