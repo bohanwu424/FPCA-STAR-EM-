@@ -23,6 +23,7 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
   orders = 4
   obase=OrthogonalSplineBasis(knots  = expand.knots(knots))
   n_basis=dim(obase)[2]
+  B=list()
   BB=array(NA, dim=c(n_basis, n_basis, n))
   for (i in 1:n)
   {
@@ -58,7 +59,7 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
   log_like_old = Inf
   log_like_new = -Inf
   log_like_diff = 2*tol
-  while (log_like_diff > tol && iter_counter<=maxiter)
+  while (parm_diff > tol && iter_counter<=maxiter)
   {
     iter_counter=iter_counter+1
     

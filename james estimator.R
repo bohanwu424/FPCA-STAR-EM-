@@ -2,12 +2,12 @@ james_estimator = function(v = y_f, theta){
   #theta = (n_dates, m, theta_start, efcn,D_0, S2_0)
   m_0 = theta[2]
   n_dates = theta[1]
-  theta_0 = matrix(theta[3:(length(theta) - m - m_0*n_dates - 1)], ncol = m_0 )
-  ef = matrix(theta[(length(theta) - m - m_0*n_dates):(length(theta) - m - 1)], nrow = n_dates )
-  D_0 = diag(theta[(length(theta) - m): (length(theta) - 1)])
+  theta_0 = matrix(theta[3:(length(theta) - m_0 - m_0*n_dates - 1)], ncol = m_0 )
+  ef = matrix(theta[(length(theta) - m_0 - m_0*n_dates):(length(theta) - m_0 - 1)], nrow = n_dates )
+  D_0 = diag(theta[(length(theta) - m_0): (length(theta) - 1)])
   s2_0 = theta[length(theta)]
   mean_parm_0 = 0; 
-  Tol = 10^{-2}; Lam = 1
+  Tol = 10^{-2}; Lam = 1000
   
   #Input dataframe
   input <<- list(Ly = matrix(nrow = n_counties, ncol = n_dates),Lt = Lt_f,all.Ly = v)
@@ -29,4 +29,3 @@ james_estimator = function(v = y_f, theta){
   
 }
 
-#fit = james_estimator(round(output$fitted.values),output$coefficients)

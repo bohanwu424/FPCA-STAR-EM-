@@ -1,4 +1,4 @@
-STAR_FPCA_EM = function (y, estimator_em = james_em(),estimator_initialize = estimator.fpca(), transformation = "np", y_max = Inf, 
+STAR_FPCA_EM = function (y, estimator_em = james_estimator,estimator_initialize = estimator.fpca, transformation = "np", y_max = Inf, 
           sd_init = 10, tol = 10^-10, max_iters = 1000) 
 {
   if (any(y < 0) || any(y != floor(y))) 
@@ -71,7 +71,7 @@ STAR_FPCA_EM = function (y, estimator_em = james_em(),estimator_initialize = est
     }
     fit = estimator_em(z_hat,theta_hat)
     mu_hat = fit$fitted.values
-    theta_hat = fit$coefficients
+    theta_hat <<- fit$coefficients
     sigma_hat = sqrt((sum(z2_hat) + sum(mu_hat^2) - 2 * 
                         sum(z_hat * mu_hat))/n)
     if (transformation == "box-cox") {
