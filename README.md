@@ -17,7 +17,7 @@ Con: Slow, Bad Fitting
 
 EM^2
 - Basic Idea:
-A STAR EM framework that takes in 2 estimators: estimator_initialize, estimator_em.
+Construct a STAR EM framework that takes in 2 estimators: estimator_initialize, estimator_em.
 In this case, estimator_initialize = face.estimator, estimator_em = james.estimator. 
 Two features: 
 1)Use estimator_initialize to initialize Theta. 
