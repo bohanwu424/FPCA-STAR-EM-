@@ -23,9 +23,10 @@ estimator.fpca = function(v = y_f)
   output <<- list(fitted.values = matrix(), coefficients = matrix())
   
   for(i in seq(n_counties)){
-    output$fitted.values <- append(output$fitted.values,fitted_f.obs[i, input$Lt[[i]]])
+    output$fitted.values <<- append(output$fitted.values,fitted_f.obs[i, input$Lt[[i]]])
   }
-  output$fitted.values <- output$fitted.values %>% na.exclude()
-  output$coefficients <- coef_f 
+  output$fitted.values <<- output$fitted.values %>% na.exclude()
+  output$coefficients <<- coef_f 
   return(output)
 }
+

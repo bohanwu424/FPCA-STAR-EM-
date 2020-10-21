@@ -1,5 +1,5 @@
 STAR_FPCA_EM = function (y, estimator_em = james_estimator,estimator_initialize = estimator.fpca, transformation = "np", y_max = Inf, 
-          sd_init = 10, tol = 10^-10, max_iters = 1000) 
+          sd_init = 10, tol = 10^-10, max_iters = 1000,show_iter = FALSE,smooth_Lam = 5000) 
 {
   if (any(y < 0) || any(y != floor(y))) 
     stop("y must be nonnegative counts")
@@ -60,6 +60,7 @@ STAR_FPCA_EM = function (y, estimator_em = james_estimator,estimator_initialize 
   theta_all = array(0, c(max_iters, p))
   sigma_all = numeric(max_iters)
   logLik_all = numeric(max_iters)
+  iter_all = numeric(max_iters)
   for (s in 1:max_iters) {
     z_mom = truncnorm_mom(a = z_lower, b = z_upper, mu = mu_hat, 
                           sig = sigma_hat)
@@ -69,9 +70,12 @@ STAR_FPCA_EM = function (y, estimator_em = james_estimator,estimator_initialize 
       warning("Infinite z_hat values: returning the problematic indices")
       return(list(error_inds = which(is.infinite(z_hat))))
     }
-    fit = estimator_em(z_hat,theta_hat)
+    fit = estimator_em(z_hat,theta_hat,smooth_Lam)
     mu_hat = fit$fitted.values
-    theta_hat <<- fit$coefficients
+    theta_hat = fit$coefficients
+    if(show_iter){
+      print(fit$iter)
+    }
     sigma_hat = sqrt((sum(z2_hat) + sum(mu_hat^2) - 2 * 
                         sum(z_hat * mu_hat))/n)
     if (transformation == "box-cox") {
@@ -100,6 +104,7 @@ STAR_FPCA_EM = function (y, estimator_em = james_estimator,estimator_initialize 
     sigma_all[s] = sigma_hat
     logLik_all[s] = logLik_em
     zhat_all[s, ] = z_hat
+    iter_all[s] = fit$iter
     if ((logLik_em - logLik_em0)^2 < tol) 
       break
     logLik_em0 = logLik_em
@@ -109,6 +114,7 @@ STAR_FPCA_EM = function (y, estimator_em = james_estimator,estimator_initialize 
   sigma_all = sigma_all[1:s]
   logLik_all = logLik_all[1:s]
   zhat_all = zhat_all[1:s, ]
+  iter_all = iter_all[1:s]
   if (y_max < Inf) {
     Jmax = rep(y_max + 1, n)
   }
@@ -133,5 +139,5 @@ STAR_FPCA_EM = function (y, estimator_em = james_estimator,estimator_initialize 
        logLik = logLik_em, logLik0 = logLik0, lambda = lambda, 
        mu_all = mu_all, theta_all = theta_all, sigma_all = sigma_all, 
        logLik_all = logLik_all, zhat_all = zhat_all, transformation = transformation, 
-       y_max = y_max, tol = tol, max_iters = max_iters)
+       y_max = y_max, tol = tol, max_iters = max_iters, iter_all = iter_all)
 }

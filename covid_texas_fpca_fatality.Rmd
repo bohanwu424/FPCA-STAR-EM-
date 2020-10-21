@@ -13,19 +13,20 @@ knitr::opts_chunk$set(echo = TRUE)
 rm(list = ls()); 
 ```
 ```{r}
-#library(devtools)
-#install_github("drkowal/rSTAR")
 library(readr)
 library(tidyverse)
 library(reshape2)
 library(dplyr)
+library(refund)
+library(gdata)
 source("fpca_em.R")
 source("james_em.R")
 source("james estimator.R")
 source("face estimator.R")
 source("star_EM2.R")
 source("estimator combined.R")
-library(refund)
+source("face estimator.R")
+source("fpca_em.R")
 ```
 ```{r}
 dat_f = read_csv(file = 'Texas COVID-19 Fatality Count Data by County.csv') 
@@ -87,7 +88,7 @@ ggplot(dat_cf.first10, aes(x = which_date, y = fatalities, group = county )) + g
 ```
 ```{r,message=FALSE}
 #Cast a matrix where columns are locations, columnas are dates
-mat_f = dcast(dat_cf.first10 %>% select(c(county,which_date,fatalities)), county ~which_date,sum, fill = -1) %>% filter(complete.cases(county)) %>% column_to_rownames(var = "county") %>% as.matrix() 
+mat_f = dcast(dat_cf.first10 %>% dplyr::select("county","which_date","fatalities"), county ~which_date,sum, fill = -1) %>% filter(complete.cases(county)) %>% column_to_rownames(var = "county") %>% as.matrix() 
 mat_f[mat_f < 0] <- NA
 ``` 
 ### Remove counties with less than 10 observations
@@ -101,107 +102,12 @@ mat_f = mat_f[selected_counties,]
 ## FPCA 
 ###Set the parameters
 ```{r}
-library(fdapace)
-library(fpca)
-library(gdata)
-library(glmnet)
-library(refund)
-
 Lt_f <- lapply(seq(nrow(mat_f)), function(i) which(!is.na(mat_f[i,]))) #Time Grid
 y_f = unmatrix(mat_f, byrow = TRUE)%>% na.exclude()  #Vectorized observations
 n_counties = nrow(mat_f) #number of counties
 n_dates = ncol(mat_f) #total days since the outbreak
 n_fpc = 4 #number of FPCs
 ```
-```{r}
-source("face estimator.R")
-source("fpca_em.R")
-
-```
-#FPCA.MLE Fitting
-```{r}
-#d = dat_cf.first10 %>% select(county,fatalities,which_date)
-FPCA.MLE.Fit <- function(input,r.set = n_fpc){
-
-#Create input dataset
-d2 <<- melt(input)  %>% 
-  rename(dates = Var2, county = Var1) %>%
-  group_by(county )  %>% 
-  drop_na()%>% mutate(dates = dates/n_dates)
-d2 = d2[,c("county","value","dates")]
-
-M.set<- c(r.set,r.set + 1)
-ini.method="EM"
-basis.method="bs"
-sl.v=rep(1.5,10)
-max.step= 50
-  
-#FPCA MLE fit
-result <<- fpca.mle(as.matrix(d2),M.set, r.set,ini.method, basis.method,sl.v,max.step, grids= seq(0,1,length.out = n_dates))
-##ret(mat_f)scaled grid
-
- grids.new<-result$grid
-
-  M <-result$selected_model[1]
-r<-result$selected_model[2]
-
- ## estimated eigenvalues 
- evalest<-result$eigenvalues     #
-
- ##estimated error variance
- sig2est<-result$error_var       
-
- ##estimated eigenfunctions
- eigenfest<<-result$eigenfunctions
- 
-# par(mfrow=c(2,3))
- #  for(i in 1:r){
- # plot(grids.new,eigenfest[i,],ylim=range(eigenfest),xlab="time",ylab=paste("eigenfunction",i))}
-
-muest<-result$fitted_mean
-fpcs<-fpca.score(d2 %>% as.matrix(),grids.new,muest,evalest,eigenfest,sig2est,r)
-
-
-pred<<-fpca.pred(fpcs, muest,eigenfest) %>% t()%>% melt()
-ggplot(pred) + geom_line(aes(x = Var2,y = value, group = Var1))
-
-opt  = list(fitted.values = matrix(), coefficients = matrix())
-opt$fitted_values = fpca.pred(fpcs, muest,eigenfest) %>% t()
-opt$coefficients = c(as.vector(fpcs),muest, as.vector(eigenfest))
-return(opt)
-}
-
-
-```
-###Estimator 1: Construct Estimator Function Using fpca.face
-```{r}
-estimator.mle = function(v = y_f)
-{
-input <<- list(Ly = matrix(nrow = n_counties, ncol = n_dates),Lt = Lt_f,all.Ly = v)
-
-for(i in seq(n_counties)){
-  input$Ly[i,input$Lt[[i]]] <- input$all.Ly[input$Lt[[i]]]
-  input$all.Ly <- input$all.Ly[-input$Lt[[i]]]
-}
-#Use first 4 FPCs
-
-FPCA.fit <- FPCA.MLE.Fit(input$Ly,n_fpc )
-
-fitted_f.obs = FPCA.fit$fitted_values
-#Output
-output <- list(fitted.values = matrix(), coefficients = matrix())
-
-for(i in seq(n_counties)){
-  output$fitted.values <- append(output$fitted.values,fitted_f.obs[i, input$Lt[[i]]])
-}
-output$coefficients <- FPCA.fit$coefficients%>% na.exclude()
-output$fitted.values <- output$fitted.values  %>% na.exclude()
-return(output)
-}
-d_1 = estimator.mle()
-```
-
-
 ##RSTAR Model Fit: FPCA + STAR EM
 ```{r freq-lm,message=FALSE,tidy.opts=list(width.cutoff=60)}
 library(rSTAR)
@@ -217,7 +123,6 @@ fit_em = star_EM(y = y_f,
   tol = 10^-6,
   max_iters = 1000)
 
-
 ```
 
 ##MLE 
@@ -225,17 +130,23 @@ fit_em = star_EM(y = y_f,
 ```{r}
 plot(fit_em$logLik_all, main = "log-likehood under log tranformation")
 which.max(fit_em$logLik_all)
+
 ```
 ```{r}
 y_hat = fitted(fit_em)
-mat_f_hat = mat_f
+get_df_fit = function(y_hat){
+  mat_f_hat = mat_f
 for(i in seq(n_counties)){
   mat_f_hat[i,input$Lt[[i]]] <- y_hat[input$Lt[[i]]]
   y_hat <- y_hat[-input$Lt[[i]]]
 }
+  dat_f_est = melt(mat_f_hat) %>% rename('county'  = Var1,which_date = Var2,fatalities_est = value)
+  dat_f_est
+}
+
 ```
 ```{r}
-dat_f_est = melt(mat_f_hat) %>% rename('county'  = Var1,which_date = Var2,fatalities_est = value)
+dat_f_est = get_df_fit(y_hat)
 dat_cf_all = dat_cf.first10 %>% inner_join(dat_f_est,by = c("county","which_date"))
 #Visualization
 p1 = ggplot(dat_cf_all, aes(x = which_date, y = fatalities, group = county)) + geom_line() + geom_line(aes(x = which_date, y = fatalities_est, group = county ,color = "estimated"))+
@@ -255,9 +166,9 @@ ef_plot1 = ggplot(dat_phis) + aes(x = which_date, y = value, color = which_fpc,g
 # EM algorithm for STAR (using the log-link)
 fit_em.np = star_EM(y = y_f, 
                  estimator = estimator.fpca, 
-                 transformation = 'np' ,
-  sd_init = 10,
-  tol = 10^-10,
+                 transformation = 'log' ,
+  sd_init = 5,
+  tol = 10^-6,
   max_iters = 100)
 plot(fit_em, main = "log-likehood under nonparametric tranformation")
 
@@ -270,8 +181,8 @@ fit_sfpca_em = STAR_FPCA_EM(y = y_f,
              estimator_initialize = estimator.fpca, 
                  transformation = "log",
   sd_init = 5,
-  tol = 10^-6,
-  max_iters = 100)
+  tol = 10^-4,
+  max_iters = 100,show_iter = TRUE,smooth_Lam = 40000)
 # 
 # fit_em2 = star_EM(y = y_f, 
 #                  estimator = estimator.combined, 
@@ -285,6 +196,8 @@ Loglikelihood Check
 plot(fit_sfpca_em$logLik_all, main = "log-likehood with EM^2")
 which.max(fit_sfpca_em$logLik_all)
 length(fit_sfpca_em$logLik_all)
+plot(fit_sfpca_em$sigma_all)
+
 ```
 
 ###Fitted values:
@@ -306,6 +219,7 @@ p2 = ggplot(dat_cf_all, aes(x = which_date, y = fatalities, group = county)) + g
 #Eigenfunctions
 ```{r}
 theta_EM2 = fit_sfpca_em$coefficients
+theta_EM2 =theta_hat
 ef = matrix(theta_EM2[(length(theta_EM2) - n_fpc - n_fpc*n_dates):(length(theta_EM2) - n_fpc - 1)], nrow = n_dates )
 dat_phis = t(ef) %>% melt() %>% rename(which_date = Var2, which_fpc = Var1) %>% mutate(which_fpc = as.factor(which_fpc))
 ef_plot2 = ggplot(dat_phis) + aes(x = which_date, y = value, color = which_fpc,group = which_fpc) +
@@ -320,6 +234,6 @@ par(mfrow = c(1,2))
 plot(fit_em$logLik_all, main = "log-likehood with Face Estimator")
 plot(fit_sfpca_em$logLik_all, main = "log-likehood with EM^2")
 abline(h = max(fit_em$logLik_all), col = 'coral2', lwd = 2)
-
-
+legend(x = length(fit_sfpca_em$logLik_all)/2,y = max(fit_em$logLik_all),"Max Log-lkhd (Face)", text.col = 'red',cex = 0.6)
+?legend
 ```

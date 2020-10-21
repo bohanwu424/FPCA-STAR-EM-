@@ -1,17 +1,18 @@
 library(MASS)
+dat = d2; groupings = 'county'; m = m_0; knots = seq(n_dates)/n_dates; lambda = 10000; 
+mean_parm_start = mean_parm_0; theta_start = theta_0;efunc = ef; D_start = D_0; s2_start = s2_0; tol = Tol; status=F; showlik=F;
+response_name="value"; time_name="dates"; maxiter= 1000
+
 james_em = function(dat, groupings = 'county', m, knots, lambda, 
                  mean_parm_start = 0, theta_start,efunc, D_start, s2_start, tol, status=F, showlik=F,
                  response_name="value", time_name="dates", maxiter= 2000)
   # m is the number of components
-{
-  # figure the names
-  
-  # Translate formula
+{ # Translate formula
   Y=dat[[as.character(response_name)]]
   TIME=dat[[as.character(time_name)]]
   SID=dat[[as.character(groupings)]]
   
-  
+
   # Restructure the data
   y=tapply(Y, SID, list)
   time=tapply(TIME, SID, list)
@@ -59,6 +60,7 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
   log_like_old = Inf
   log_like_new = -Inf
   log_like_diff = 2*tol
+  
   while (parm_diff > tol && iter_counter<=maxiter)
   {
     iter_counter=iter_counter+1
@@ -145,7 +147,7 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
     
   }
 
-  output <<- list(fitted.values = matrix(), coefficients = matrix())
+  output = list(fitted.values = matrix(), coefficients = matrix())
   #fitted values#
   Yy = matrix(nrow = n, ncol = length(knots))
   for(i in seq(n)){
@@ -154,6 +156,7 @@ james_em = function(dat, groupings = 'county', m, knots, lambda,
   output$fitted.values <- as.vector(t(Yy)) %>% na.exclude()
   output$coefficients <- c(length(unique(TIME)), m,
                            as.vector(theta),as.vector(evaluate(obase, knots)%*% theta),
-                           diag(D), s2) %>% na.exclude()
+                           diag(D), s2)
+  output$iter = iter_counter
     return(output)
 }
