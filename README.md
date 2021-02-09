@@ -1,5 +1,5 @@
 # FPCA-STAR-EM-
-Ensembled FPCA and STAR Model
+Functional Principle Component Analysis Model under STAR Framework(Kowal et al.2020)
 
 Main File: covid_texas_fpca_fatalities
 
